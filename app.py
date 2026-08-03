@@ -5,6 +5,8 @@ Entry point for the QR Code Scanner Pro web application (Flask).
 Run with:  python app.py   (or  python main.py)
 """
 
+import os
+
 from flask import Flask
 
 from routes import routes_bp
@@ -24,4 +26,7 @@ app = create_app()
 if __name__ == "__main__":
     # debug=False avoids the reloader spawning a second process, which
     # would fight over the webcam and duplicate the history singleton.
-    app.run(host="127.0.0.1", port=5000, debug=False, threaded=True)
+    # Host/port come from the environment (Render assigns PORT).
+    host = os.environ.get("HOST", "0.0.0.0")
+    port = int(os.environ.get("PORT", "5000"))
+    app.run(host=host, port=port, debug=False, threaded=True)

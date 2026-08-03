@@ -1,0 +1,17 @@
+# Render Blueprint for the QR Code Scanner Pro web service.
+# The service builds from the Dockerfile in this repo.
+
+services:
+  - type: web
+    name: qr-scanner
+    runtime: docker
+    repo: https://github.com/KamsiyochukwuOgbuefi/QR-Scanner
+    plan: free
+    autoDeploy: true
+    healthCheckPath: /
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: PYTHONDONTWRITEBYTECODE
+        value: "1"
