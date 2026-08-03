@@ -451,6 +451,8 @@ function setCameraButtonsRunning(running) {
   [el.startCameraBtn, el.heroStartBtn].forEach((btn) => {
     if (!btn) return;
     btn.innerHTML = (ICONS[icon] || "") + `<span>${label}</span>`;
+    btn.classList.remove("is-loading");
+    btn.disabled = false;
     btn.classList.toggle("btn-primary", !running);
     btn.classList.toggle("btn-danger-ghost", running);
     btn.dataset.label = label;
