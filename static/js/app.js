@@ -213,17 +213,19 @@ function download(filename, content, mime = "text/plain") {
 function setLoading(btn, loading, label = null) {
   if (!btn) return;
   if (loading) {
-    btn.dataset.label = label || btn.textContent.trim();
-    btn.innerHTML = `<span class="spinner"></span>${esc(btn.dataset.label)}`;
+    if (!btn.dataset.originalLabel) btn.dataset.originalLabel = btn.textContent.trim();
+    if (!btn.dataset.originalIcon) btn.dataset.originalIcon = btn.dataset.icon;
+    const shown = label || btn.dataset.originalLabel;
+    btn.dataset.label = shown;
+    btn.innerHTML = `<span class="spinner"></span>${esc(shown)}`;
     btn.classList.add("is-loading");
     btn.disabled = true;
   } else {
     btn.classList.remove("is-loading");
     btn.disabled = false;
-    if (btn.dataset.label) {
-      btn.textContent = "";
-      btn.innerHTML = (ICONS[btn.dataset.icon] || "") + `<span>${btn.dataset.label}</span>`;
-    }
+    const restore = btn.dataset.originalLabel || btn.dataset.label || "";
+    btn.textContent = "";
+    btn.innerHTML = (ICONS[btn.dataset.originalIcon || btn.dataset.icon] || "") + `<span>${restore}</span>`;
   }
 }
 
@@ -453,6 +455,8 @@ function setCameraButtonsRunning(running) {
     btn.classList.toggle("btn-danger-ghost", running);
     btn.dataset.label = label;
     btn.dataset.icon = icon;
+    btn.dataset.originalLabel = label;
+    btn.dataset.originalIcon = icon;
   });
 }
 
