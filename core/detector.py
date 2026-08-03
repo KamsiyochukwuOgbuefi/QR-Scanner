@@ -85,7 +85,7 @@ class QRDetector:
                         text = text.decode("utf-8", errors="replace")
                     pts = []
                     if points is not None and len(points) > i:
-                        pts = [(float(x), float(y)) for x, y in points[i]]
+                        pts = [(int(x), int(y)) for x, y in points[i]]
                     results.append(DetectedCode(data=text, points=pts))
         except Exception:
             pass

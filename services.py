@@ -464,12 +464,15 @@ class QRScannerService:
 
     def annotate_image(self, frame) -> str:
         """Return a base64 data URI of the frame with green boxes drawn."""
-        codes = self.detector.scan_frame(frame)
-        for code in codes:
-            if code.points:
-                pts = code.points
-                for i in range(len(pts)):
-                    cv2.line(frame, pts[i], pts[(i + 1) % len(pts)], (0, 200, 0), 3)
+        try:
+            codes = self.detector.scan_frame(frame)
+            for code in codes:
+                if code.points:
+                    pts = code.points
+                    for i in range(len(pts)):
+                        cv2.line(frame, pts[i], pts[(i + 1) % len(pts)], (0, 200, 0), 3)
+        except Exception:
+            pass
         ok, jpg = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
         if not ok:
             return ""
