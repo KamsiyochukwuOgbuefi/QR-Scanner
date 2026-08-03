@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>QR Scanner Pro — Scan QR Codes in your browser</title>
+  <meta name="description" content="Scan QR codes live from your camera or an image. Detect URLs, Wi-Fi, contacts, events, crypto and more — entirely in your browser.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%233B82F6' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M3 7V5a2 2 0 0 1 2-2h2'/%3E%3Cpath d='M17 3h2a2 2 0 0 1 2 2v2'/%3E%3Cpath d='M21 17v2a2 2 0 0 1-2 2h-2'/%3E%3Cpath d='M7 21H5a2 2 0 0 1-2-2v-2'/%3E%3Crect x='7' y='7' width='3' height='3'/%3E%3Crect x='14' y='7' width='3' height='3'/%3E%3Crect x='7' y='14' width='3' height='3'/%3E%3Crect x='14' y='14' width='3' height='3'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+
+  <!-- Ambient background -->
+  <div class="bg-glow bg-glow-1"></div>
+  <div class="bg-glow bg-glow-2"></div>
+  <div class="bg-glow bg-glow-3"></div>
+  <div class="bg-grid"></div>
+
+  <!-- Navigation -->
+  <nav class="navbar">
+    <div class="nav-inner">
+      <a class="nav-brand" href="#scanner" data-icon="qr" aria-label="QR Scanner Pro"></a>
+      <span class="brand-name">QR Scanner <span class="brand-pro">Pro</span></span>
+      <div class="nav-links">
+        <a href="#scanner" class="nav-link">Scanner</a>
+        <a href="#history" class="nav-link">History</a>
+      </div>
+      <div class="nav-status">
+        <span class="status-dot" id="navDot"></span>
+        <span id="navStatusText">Idle</span>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Hero -->
+  <header class="hero">
+    <div class="hero-badge">
+      <span class="hero-badge-dot"></span>
+      Private · Local · Instant
+    </div>
+    <h1 class="hero-title">Scan QR codes<br><span class="gradient-text">right in your browser.</span></h1>
+    <p class="hero-sub">
+      Point your camera at any QR code or drop in an image. We detect, decode and
+      classify it instantly — URLs, Wi-Fi credentials, contacts, calendar events,
+      crypto addresses and more.
+    </p>
+    <div class="hero-actions">
+      <button class="btn btn-primary btn-lg" id="heroStartBtn" data-icon="camera">Start Camera</button>
+      <button class="btn btn-outline btn-lg" id="heroUploadBtn" data-icon="upload">Upload Image</button>
+    </div>
+    <div class="hero-stats">
+      <div class="stat">
+        <strong id="statScans">0</strong>
+        <span>Total scans</span>
+      </div>
+      <div class="stat-divider"></div>
+      <div class="stat">
+        <strong id="statTypes">0</strong>
+        <span>Content types</span>
+      </div>
+      <div class="stat-divider"></div>
+      <div class="stat">
+        <strong id="statCameras">0</strong>
+        <span>Cameras</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+
+    <!-- Scanner + Result -->
+    <div class="grid-2">
+
+      <!-- Scanner card -->
+      <section class="card scanner-card" id="scanner">
+        <div class="card-head">
+          <div class="card-title"><span data-icon="qr"></span> Scanner</div>
+          <div class="camera-status">
+            <span class="status-dot" id="cameraDot"></span>
+            <span id="cameraStatusText">Camera off</span>
+          </div>
+        </div>
+
+        <div class="viewport" id="viewport">
+          <img id="cameraFeed" class="camera-feed" alt="Camera preview">
+          <div class="viewfinder hidden" id="viewfinder">
+            <span class="corner corner-tl"></span>
+            <span class="corner corner-tr"></span>
+            <span class="corner corner-bl"></span>
+            <span class="corner corner-br"></span>
+            <div class="scan-line"></div>
+          </div>
+          <div class="viewport-overlay" id="viewportOverlay">
+            <div class="cam-placeholder">
+              <span class="ph-icon" data-icon="camera"></span>
+              <p class="ph-title">Camera is off</p>
+              <p class="ph-sub">Start the camera to scan live</p>
+              <button class="btn btn-primary btn-sm" id="overlayStartBtn" data-icon="play">Start Camera</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="scanner-controls">
+          <button class="btn btn-primary" id="startCameraBtn" data-icon="camera">Start Camera</button>
+          <button class="btn btn-outline" id="switchCameraBtn" disabled data-icon="switch">Switch</button>
+          <button class="btn btn-outline" id="uploadBtn" data-icon="upload">Upload</button>
+        </div>
+
+        <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="Upload an image to scan">
+          <span class="dz-icon" data-icon="image"></span>
+          <p class="dz-title">Drag &amp; drop an image, or click to browse</p>
+          <p class="dz-hint">PNG · JPG · JPEG · BMP · GIF · WebP · TIFF</p>
+        </div>
+
+        <label class="auto-open">
+          <input type="checkbox" id="autoOpenToggle" checked>
+          <span class="switch-track"><span class="switch-thumb"></span></span>
+          <span class="auto-open-label">Auto-open links when detected</span>
+        </label>
+
+        <input type="file" id="fileInput" accept=".png,.jpg,.jpeg,.bmp,.gif,.webp,.tiff,image/*" hidden>
+      </section>
+
+      <!-- Result card -->
+      <section class="card result-card" id="resultCard">
+        <div class="card-head">
+          <div class="card-title"><span data-icon="scan-result"></span> Result</div>
+          <span class="type-badge type-badge-neutral" id="resultBadge">No scan yet</span>
+        </div>
+
+        <div class="result-body" id="resultBody">
+          <div class="result-empty" id="resultEmpty">
+            <span class="empty-art" data-icon="qr-big"></span>
+            <p class="empty-title">Waiting for a scan</p>
+            <p class="empty-sub">Point your camera at a QR Code or upload an image to begin.</p>
+          </div>
+
+          <div class="result-content hidden" id="resultContent">
+            <div class="success-anim" id="successAnim">
+              <svg viewBox="0 0 52 52"><path d="M14 27l8 8 16-18"/></svg>
+            </div>
+            <div class="result-meta">
+              <span class="result-time" id="resultTime"></span>
+              <span class="action-msg" id="resultActionMsg"></span>
+            </div>
+            <div class="result-text" id="resultText"></div>
+            <div class="result-actions">
+              <button class="btn btn-outline" id="copyBtn" data-icon="copy">Copy</button>
+              <button class="btn btn-outline" id="saveBtn" data-icon="save">Save</button>
+              <button class="btn btn-success" id="openBtn" data-icon="external" disabled>Open</button>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- History -->
+    <section class="card history-card" id="history">
+      <div class="history-head">
+        <div class="card-title">
+          <span data-icon="history"></span> Scan History
+          <span class="count-chip" id="historyCount">0</span>
+        </div>
+        <div class="history-tools">
+          <div class="search-box">
+            <span class="search-icon" data-icon="search"></span>
+            <input type="text" id="searchInput" placeholder="Search history..." autocomplete="off">
+          </div>
+          <div class="select-wrap">
+            <select id="typeFilter" aria-label="Filter by content type"></select>
+          </div>
+          <div class="select-wrap">
+            <select id="sortOrder" aria-label="Sort order">
+              <option value="desc">Newest first</option>
+              <option value="asc">Oldest first</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div class="history-toolbar">
+        <div class="export-group">
+          <span class="toolbar-label">Export</span>
+          <button class="btn btn-ghost btn-sm" data-export="txt">TXT</button>
+          <button class="btn btn-ghost btn-sm" data-export="csv">CSV</button>
+          <button class="btn btn-ghost btn-sm" data-export="json">JSON</button>
+        </div>
+        <button class="btn btn-danger-ghost btn-sm" id="clearHistoryBtn" data-icon="trash">Clear History</button>
+      </div>
+
+      <div class="history-list" id="historyList"></div>
+
+      <div class="history-empty hidden" id="historyEmpty">
+        <span class="empty-art" data-icon="qr-big"></span>
+        <p class="empty-title">Nothing scanned yet</p>
+        <p class="empty-sub">Point your camera at a QR Code or upload an image to begin.</p>
+        <button class="btn btn-primary btn-sm" id="emptyUploadBtn" data-icon="upload">Upload an Image</button>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="footer">
+    <span class="footer-dot"></span> QR Scanner Pro · Runs locally on your machine · Nothing leaves your device
+  </footer>
+
+  <div class="toast-container" id="toastContainer" aria-live="polite"></div>
+
+  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
