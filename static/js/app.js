@@ -96,18 +96,26 @@ function debounce(fn, ms) {
 const state = {
   cameraRunning: false,
   cameras: 0,
-  pollTimer: null,
-  lastEventTs: 0,
   currentRaw: "",
   currentCopyText: "",
   historyLimit: 1000,
+  cameraStream: null,
+  videoTrack: null,
+  facingMode: "environment",
+  mediaDevices: [],
+  decodeTimer: null,
+  lastTriggered: "",
+  absenceCounter: 0,
+  scanCanvas: null,
+  scanCtx: null,
 };
 
 const el = {
   navDot: $("#navDot"), navStatusText: $("#navStatusText"),
   cameraDot: $("#cameraDot"), cameraStatusText: $("#cameraStatusText"),
   viewport: $("#viewport"), viewfinder: $("#viewfinder"), viewportOverlay: $("#viewportOverlay"),
-  cameraFeed: $("#cameraFeed"),
+  viewportLoading: $("#viewportLoading"), viewportLoadingText: $("#viewportLoadingText"),
+  cameraFeed: $("#cameraFeed"), cameraVideo: $("#cameraVideo"),
   startCameraBtn: $("#startCameraBtn"), heroStartBtn: $("#heroStartBtn"),
   overlayStartBtn: $("#overlayStartBtn"), switchCameraBtn: $("#switchCameraBtn"),
   uploadBtn: $("#uploadBtn"), heroUploadBtn: $("#heroUploadBtn"),
@@ -220,66 +228,170 @@ function setLoading(btn, loading, label = null) {
 }
 
 /* ------------------------------------------------------------------ *
-   Camera
- * ------------------------------------------------------------------ */
+   Camera (browser / client-side via navigator.mediaDevices)
+   ------------------------------------------------------------------ */
+
+const CAMERA_DECODE_INTERVAL = 240;       // ms between frame decodes
+const CAMERA_ABSENCE_RESET_FRAMES = 10;   // frames w/o a code before resetting the duplicate guard
+const CAMERA_DECODE_MAX_WIDTH = 640;      // downscale decode frames for speed on mobile
+
+function isSecureCameraContext() {
+  return window.isSecureContext && !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+}
+
+function cameraErrorMessage(err) {
+  const name = (err && err.name) || "";
+  switch (name) {
+    case "NotAllowedError":
+    case "PermissionDeniedError":
+    case "SecurityError":
+      return "Camera permission was denied. Allow camera access for this site in your browser settings, then try again.";
+    case "NotFoundError":
+    case "DevicesNotFoundError":
+      return "No camera was detected on this device.";
+    case "NotReadableError":
+    case "AbortError":
+      return "The camera is already in use by another app or browser tab. Close it and try again.";
+    case "OverconstrainedError":
+      return "No camera matches the requested settings.";
+    case "NotSupportedError":
+      return "Camera access is not supported by this browser.";
+    default:
+      return (err && err.message) ? err.message : "Could not access the camera.";
+  }
+}
+
+async function detectMediaDevices(requestPermission) {
+  const info = { devices: [], permission: false, error: null };
+  if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return info;
+  try {
+    let devices = await navigator.mediaDevices.enumerateDevices();
+    let cams = devices.filter((d) => d.kind === "videoinput");
+    if (requestPermission || cams.length === 0) {
+      try {
+        const probe = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        info.permission = true;
+        probe.getTracks().forEach((t) => t.stop());
+        devices = await navigator.mediaDevices.enumerateDevices();
+        cams = devices.filter((d) => d.kind === "videoinput");
+      } catch (err) {
+        info.permission = false;
+        info.error = err;
+      }
+    }
+    info.devices = cams;
+  } catch (err) {
+    info.error = err;
+  }
+  return info;
+}
+
+async function acquireStream(constraints) {
+  const attempts = [
+    constraints,
+    { video: true, audio: false },
+  ];
+  const fatal = ["NotAllowedError", "PermissionDeniedError", "SecurityError", "NotFoundError", "DevicesNotFoundError", "NotReadableError", "AbortError", "NotSupportedError"];
+  let lastErr = null;
+  for (const attempt of attempts) {
+    try {
+      return await navigator.mediaDevices.getUserMedia(attempt);
+    } catch (err) {
+      lastErr = err;
+      if (fatal.includes(err.name)) break;
+    }
+  }
+  setStatus("error", "Camera error", { camera: true });
+  toast(cameraErrorMessage(lastErr), "error", null, 6000);
+  return null;
+}
 
 async function startCamera() {
-  setLoading(el.startCameraBtn, true, "Starting…");
-  setLoading(el.heroStartBtn, true, "Starting…");
-  let res;
-  try {
-    res = await api("/api/camera/start", { method: "POST" });
-  } catch (err) {
-    res = { ok: false, data: { success: false, message: err.message } };
-  }
-  setLoading(el.startCameraBtn, false);
-  setLoading(el.heroStartBtn, false);
-
-  if (!res.ok || !res.data.success) {
-    toast(res.data.message || "Could not start the camera.", "error");
-    setStatus("error", "Camera error", { camera: true });
+  if (state.cameraRunning) return;
+  if (!isSecureCameraContext()) {
+    setStatus("error", "Camera unavailable", { camera: true });
+    toast(
+      window.isSecureContext
+        ? "Camera access is not available in this browser."
+        : "Camera access requires a secure (HTTPS) connection. Open the app over HTTPS to use the camera.",
+      "error", null, 6000
+    );
     return;
   }
 
-  state.cameraRunning = true;
-  state.lastEventTs = Date.now() / 1000;
+  setLoading(el.startCameraBtn, true, "Requesting…");
+  setLoading(el.heroStartBtn, true, "Requesting…");
+  showViewportLoading("Requesting camera access…");
 
+  const preferred = {
+    video: state.facingMode === "user"
+      ? { facingMode: { ideal: "user" } }
+      : { facingMode: { ideal: "environment" } },
+    audio: false,
+  };
+  const stream = await acquireStream(preferred);
+
+  if (!stream) {
+    setLoading(el.startCameraBtn, false);
+    setLoading(el.heroStartBtn, false);
+    hideViewportLoading();
+    return;
+  }
+
+  state.cameraStream = stream;
+  state.cameraRunning = true;
+  const track = stream.getVideoTracks()[0];
+  state.videoTrack = track || null;
+  if (track && track.getSettings) {
+    const fm = track.getSettings().facingMode;
+    if (fm) state.facingMode = fm;
+  }
+
+  const info = await detectMediaDevices(false);
+  state.mediaDevices = info.devices;
+  state.cameras = info.devices.length;
+
+  el.cameraFeed.classList.remove("is-visible");
+  el.cameraFeed.src = "";
+  el.cameraVideo.srcObject = stream;
+  el.cameraVideo.play().catch(() => {});
+  el.cameraVideo.classList.add("is-visible");
   el.viewfinder.classList.remove("hidden");
   el.viewportOverlay.classList.add("is-hidden");
-  el.cameraFeed.classList.add("is-visible");
-  el.cameraFeed.src = `/camera?t=${Date.now()}`;
+  hideViewportLoading();
 
-  el.startCameraBtn.innerHTML = (ICONS.stop || "") + "<span>Stop Camera</span>";
-  el.startCameraBtn.classList.remove("btn-primary");
-  el.startCameraBtn.classList.add("btn-danger-ghost");
-  el.heroStartBtn.textContent = "";
-  el.heroStartBtn.innerHTML = (ICONS.stop || "") + "<span>Stop Camera</span>";
-  el.heroStartBtn.classList.remove("btn-primary");
-  el.heroStartBtn.classList.add("btn-danger-ghost");
-  el.switchCameraBtn.disabled = state.cameras < 2;
+  setCameraButtonsRunning(true);
+  updateStatCameras();
 
   setStatus("scanning", "Camera scanning…", { nav: true, camera: true });
-  toast("Camera Started", "success", "Live scanning is active.");
-  startEventPolling();
+  toast(
+    "Camera Started",
+    "success",
+    info.devices.length ? `${info.devices.length} camera${info.devices.length > 1 ? "s" : ""} detected` : "Live scanning is active."
+  );
+  startDecodeLoop();
 }
 
 async function stopCamera(silent = false) {
-  await api("/api/camera/stop", { method: "POST" }).catch(() => {});
+  stopDecodeLoop();
+  if (state.cameraStream) {
+    state.cameraStream.getTracks().forEach((t) => t.stop());
+    state.cameraStream = null;
+  }
+  state.videoTrack = null;
   state.cameraRunning = false;
-  stopEventPolling();
+  state.lastTriggered = "";
+  state.absenceCounter = 0;
 
+  el.cameraVideo.srcObject = null;
+  el.cameraVideo.classList.remove("is-visible");
   el.cameraFeed.src = "";
   el.cameraFeed.classList.remove("is-visible");
   el.viewfinder.classList.add("hidden");
   el.viewportOverlay.classList.remove("is-hidden");
+  hideViewportLoading();
 
-  el.startCameraBtn.innerHTML = (ICONS.camera || "") + "<span>Start Camera</span>";
-  el.startCameraBtn.classList.add("btn-primary");
-  el.startCameraBtn.classList.remove("btn-danger-ghost");
-  el.heroStartBtn.innerHTML = (ICONS.camera || "") + "<span>Start Camera</span>";
-  el.heroStartBtn.classList.add("btn-primary");
-  el.heroStartBtn.classList.remove("btn-danger-ghost");
-
+  setCameraButtonsRunning(false);
   setStatus("idle", "Camera stopped", { nav: true, camera: true });
   if (!silent) toast("Camera Stopped", "info");
 }
@@ -290,31 +402,131 @@ async function toggleCamera() {
 }
 
 async function switchCamera() {
-  setLoading(el.switchCameraBtn, true, "Switching…");
-  const res = await api("/api/camera/switch", { method: "POST" }).catch(() => ({ data: { success: false, message: "Switch failed." } }));
-  setLoading(el.switchCameraBtn, false);
-  if (!res.data.success) {
-    toast(res.data.message || "Could not switch camera.", "error");
+  if (!state.cameraRunning) {
+    toast("Start the camera first", "warning");
     return;
   }
-  el.cameraFeed.src = `/camera?t=${Date.now()}`;
-  toast("Camera Switched", "success", `Now using camera ${res.data.index}.`);
+  setLoading(el.switchCameraBtn, true, "Switching…");
+  showViewportLoading("Switching camera…");
+
+  const info = await detectMediaDevices(false);
+  state.mediaDevices = info.devices;
+  const usable = info.devices.filter((d) => d.deviceId);
+
+  let constraints = null;
+  if (usable.length > 1 && state.videoTrack) {
+    const activeId = (state.videoTrack.getSettings && state.videoTrack.getSettings().deviceId) || null;
+    const idx = usable.findIndex((d) => d.deviceId === activeId);
+    const next = usable[(idx + 1) % usable.length];
+    constraints = { video: { deviceId: { exact: next.deviceId } }, audio: false };
+    state.facingMode = /front|user|前置|内/i.test(next.label || "") ? "user" : "environment";
+  } else {
+    const nextFacing = state.facingMode === "environment" ? "user" : "environment";
+    constraints = { video: { facingMode: { ideal: nextFacing } }, audio: false };
+    state.facingMode = nextFacing;
+  }
+
+  const stream = await acquireStream(constraints);
+  if (!stream) {
+    setLoading(el.switchCameraBtn, false);
+    hideViewportLoading();
+    return;
+  }
+
+  state.cameraStream.getTracks().forEach((t) => t.stop());
+  state.cameraStream = stream;
+  state.videoTrack = stream.getVideoTracks()[0] || null;
+  el.cameraVideo.srcObject = stream;
+  el.cameraVideo.play().catch(() => {});
+  setLoading(el.switchCameraBtn, false);
+  hideViewportLoading();
+  toast("Camera Switched", "success");
 }
 
-function startEventPolling() {
-  stopEventPolling();
-  state.pollTimer = setInterval(async () => {
+function setCameraButtonsRunning(running) {
+  const label = running ? "Stop Camera" : "Start Camera";
+  const icon = running ? "stop" : "camera";
+  [el.startCameraBtn, el.heroStartBtn].forEach((btn) => {
+    if (!btn) return;
+    btn.innerHTML = (ICONS[icon] || "") + `<span>${label}</span>`;
+    btn.classList.toggle("btn-primary", !running);
+    btn.classList.toggle("btn-danger-ghost", running);
+    btn.dataset.label = label;
+    btn.dataset.icon = icon;
+  });
+}
+
+function showViewportLoading(text) {
+  el.viewportLoadingText.textContent = text || "Requesting camera access…";
+  el.viewportLoading.classList.remove("hidden");
+}
+
+function hideViewportLoading() {
+  el.viewportLoading.classList.add("hidden");
+}
+
+/* Decode loop (client-side via jsQR) */
+
+function startDecodeLoop() {
+  stopDecodeLoop();
+  state.decodeTimer = setInterval(tickDecode, CAMERA_DECODE_INTERVAL);
+}
+
+function stopDecodeLoop() {
+  if (state.decodeTimer) { clearInterval(state.decodeTimer); state.decodeTimer = null; }
+}
+
+function ensureScanCanvas() {
+  if (!state.scanCanvas) {
+    state.scanCanvas = document.createElement("canvas");
+    state.scanCtx = state.scanCanvas.getContext("2d", { willReadFrequently: true });
+  }
+  return state.scanCtx;
+}
+
+function tickDecode() {
+  const video = el.cameraVideo;
+  if (!video || video.readyState < 2 || !video.videoWidth) return;
+  const ctx = ensureScanCanvas();
+  const scale = video.videoWidth > CAMERA_DECODE_MAX_WIDTH ? CAMERA_DECODE_MAX_WIDTH / video.videoWidth : 1;
+  const w = Math.max(1, Math.floor(video.videoWidth * scale));
+  const h = Math.max(1, Math.floor(video.videoHeight * scale));
+  state.scanCanvas.width = w;
+  state.scanCanvas.height = h;
+  ctx.drawImage(video, 0, 0, w, h);
+
+  let imageData;
+  try { imageData = ctx.getImageData(0, 0, w, h); } catch (_) { return; }
+
+  let code = null;
+  if (typeof jsQR === "function") {
     try {
-      const res = await api(`/api/camera/events?after=${state.lastEventTs}`);
-      const events = res.data.events || [];
-      if (!events.length) return;
-      events.forEach((ev) => { state.lastEventTs = ev.ts; onScanDetected(ev); });
-    } catch (_) { /* transient network blip; keep polling */ }
-  }, 1300);
+      code = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: "dontInvert" });
+    } catch (_) { /* ignore transient decode errors */ }
+  }
+
+  if (code && code.data) {
+    state.absenceCounter = 0;
+    if (code.data !== state.lastTriggered) {
+      state.lastTriggered = code.data;
+      onClientCodeDetected(code.data);
+    }
+  } else {
+    state.absenceCounter++;
+    if (state.absenceCounter > CAMERA_ABSENCE_RESET_FRAMES) {
+      state.lastTriggered = "";
+      state.absenceCounter = 0;
+    }
+  }
 }
 
-function stopEventPolling() {
-  if (state.pollTimer) { clearInterval(state.pollTimer); state.pollTimer = null; }
+async function onClientCodeDetected(raw) {
+  const res = await api("/api/camera/scan", { method: "POST", body: { raw } }).catch(() => null);
+  if (res && res.data && res.data.success) {
+    onScanDetected(res.data.scan);
+  } else {
+    toast("QR Detected", "info", raw, 2400);
+  }
 }
 
 /* ------------------------------------------------------------------ *
@@ -381,6 +593,7 @@ async function uploadFile(file) {
     toast("Unsupported image type", "error", "Use PNG, JPG, JPEG, BMP, GIF, WebP or TIFF.");
     return;
   }
+  if (state.cameraRunning) await stopCamera(true);
   const fd = new FormData();
   fd.append("image", file);
 
@@ -576,8 +789,13 @@ function attachRipple() {
  * ------------------------------------------------------------------ */
 
 async function initCameraInfo() {
-  const res = await api("/api/camera/list").catch(() => ({ data: { cameras: [] } }));
-  state.cameras = (res.data.cameras || []).length;
+  const info = await detectMediaDevices(false);
+  state.mediaDevices = info.devices;
+  state.cameras = info.devices.length;
+  updateStatCameras();
+}
+
+function updateStatCameras() {
   el.statCameras.textContent = String(state.cameras);
   el.switchCameraBtn.disabled = state.cameras < 2;
 }

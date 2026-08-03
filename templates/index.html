@@ -85,7 +85,12 @@
         </div>
 
         <div class="viewport" id="viewport">
-          <img id="cameraFeed" class="camera-feed" alt="Camera preview">
+          <img id="cameraFeed" class="camera-feed" alt="Upload preview">
+          <video id="cameraVideo" class="camera-feed" playsinline autoplay muted></video>
+          <div class="viewport-loading hidden" id="viewportLoading">
+            <span class="viewport-spinner"></span>
+            <p id="viewportLoadingText">Requesting camera access…</p>
+          </div>
           <div class="viewfinder hidden" id="viewfinder">
             <span class="corner corner-tl"></span>
             <span class="corner corner-tr"></span>
@@ -209,6 +214,7 @@
 
   <div class="toast-container" id="toastContainer" aria-live="polite"></div>
 
+  <script src="{{ url_for('static', filename='vendor/jsqr.js') }}"></script>
   <script src="{{ url_for('static', filename='js/app.js') }}"></script>
 </body>
 </html>

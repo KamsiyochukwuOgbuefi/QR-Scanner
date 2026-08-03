@@ -13,7 +13,17 @@ from dataclasses import dataclass
 
 import cv2
 import numpy as np
-from pyzbar.pyzbar import decode as zbar_decode
+
+try:
+    from pyzbar.pyzbar import decode as zbar_decode
+    ZBAR_AVAILABLE = True
+except Exception:
+    # pyzbar needs the zbar shared library (libzbar0 on Linux). It is
+    # bundled with the Windows/macOS wheels, but on a minimal Linux
+    # runtime (e.g. Render's native Python) it may be missing. In that
+    # case we fall back to OpenCV's built-in QR detector below.
+    zbar_decode = None
+    ZBAR_AVAILABLE = False
 
 
 @dataclass
@@ -42,20 +52,43 @@ class QRDetector:
     def scan_frame(self, frame: np.ndarray) -> list[DetectedCode]:
         """Scan a single OpenCV BGR frame (image array) for QR codes."""
         results = []
-        try:
-            decoded_objects = zbar_decode(frame)
-        except Exception:
-            decoded_objects = []
-
-        for obj in decoded_objects:
-            if obj.type != "QRCODE":
-                continue
+        if ZBAR_AVAILABLE:
             try:
-                data = obj.data.decode("utf-8")
-            except UnicodeDecodeError:
-                data = obj.data.decode("utf-8", errors="replace")
-            points = [(p.x, p.y) for p in obj.polygon] if obj.polygon else []
-            results.append(DetectedCode(data=data, points=points))
+                decoded_objects = zbar_decode(frame)
+            except Exception:
+                decoded_objects = []
+
+            for obj in decoded_objects:
+                if obj.type != "QRCODE":
+                    continue
+                try:
+                    data = obj.data.decode("utf-8")
+                except UnicodeDecodeError:
+                    data = obj.data.decode("utf-8", errors="replace")
+                points = [(p.x, p.y) for p in obj.polygon] if obj.polygon else []
+                results.append(DetectedCode(data=data, points=points))
+
+            if results:
+                return results
+
+        # Fallback: OpenCV's built-in QR detector. Used when zbar is not
+        # available (no libzbar0), and also as a second pass when zbar
+        # found nothing (they complement each other on tricky images).
+        try:
+            detector = cv2.QRCodeDetector()
+            retval, decoded_info, points, _ = detector.detectAndDecodeMulti(frame)
+            if retval and decoded_info:
+                for i, text in enumerate(decoded_info):
+                    if not text:
+                        continue
+                    if isinstance(text, bytes):
+                        text = text.decode("utf-8", errors="replace")
+                    pts = []
+                    if points is not None and len(points) > i:
+                        pts = [(float(x), float(y)) for x, y in points[i]]
+                    results.append(DetectedCode(data=text, points=pts))
+        except Exception:
+            pass
 
         return results
 

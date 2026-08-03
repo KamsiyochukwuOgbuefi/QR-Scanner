@@ -125,6 +125,22 @@ def camera_events():
     return jsonify({"events": services.events_after(after)})
 
 
+@routes_bp.post("/api/camera/scan")
+def camera_scan_raw():
+    """Process a QR payload decoded client-side (navigator.mediaDevices).
+
+    The browser scans frames locally with jsQR and sends the raw text here
+    so it flows through the same parse / action / history pipeline as every
+    other scan (mirrors what the server-side camera loop calls).
+    """
+    body = request.get_json(silent=True) or {}
+    raw = (body.get("raw") or "").strip()
+    if not raw:
+        return jsonify(success=False, message="No content provided."), 400
+    payload = services.process_scan(raw)
+    return jsonify(success=True, scan=payload)
+
+
 # ------------------------------------------------------------------ #
 # History
 # ------------------------------------------------------------------ #
